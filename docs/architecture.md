@@ -4,7 +4,7 @@ The system separates the fixed model from identity data:
 
 ```mermaid
 flowchart LR
-  Camera --> Detect[OpenCV YuNet] --> Align[OpenCV SFace alignment] --> Embed[Fixed OpenCV SFace model]
+  Camera --> Detect[YOLOv8-Face detector] --> Align[Face crop and preprocessing] --> Embed[Fixed FaceNet VGGFace2 model]
   Embed --> Search[FAISS / exact vector search]
   Search --> Threshold{Configured threshold}
   Threshold --> Known

@@ -1,5 +1,6 @@
-"""OpenCV SFace feature extraction and embedding normalization."""
+"""Fixed pretrained FaceNet embedding extraction."""
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,7 +9,7 @@ import numpy as np
 
 
 class EmbeddingModelUnavailable(RuntimeError):
-    """Raised when the OpenCV SFace model cannot be loaded."""
+    """Raised when the pretrained FaceNet model cannot be loaded."""
 
 
 def normalize_embedding(vector: np.ndarray) -> np.ndarray:
@@ -26,38 +27,57 @@ class FaceEmbedding:
     dimension: int
 
 
-class SFaceEmbedder:
-    """Generate normalized 128-D embeddings with OpenCV FaceRecognizerSF."""
+class FaceNetEmbedder:
+    """Produce 512-D FaceNet embeddings with InceptionResnetV1/VGGFace2.
 
-    def __init__(self, model_path: str | Path | None = None) -> None:
-        path = Path(model_path) if model_path else Path(__file__).resolve().parents[2] / "models" / "face_recognition_sface_2021dec.onnx"
-        if not path.exists():
-            raise EmbeddingModelUnavailable(f"SFace model not found: {path}. Run python backend/scripts/download_models.py")
+    YOLO supplies the face box. The face is clipped, padded to a square,
+    resized to FaceNet's required 160x160 RGB input, and prewhitened.
+    """
+
+    def __init__(self, cache_dir: str | Path | None = None) -> None:
+        cache = Path(cache_dir) if cache_dir else Path(__file__).resolve().parents[2] / "models" / "facenet-cache"
+        cache.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("TORCH_HOME", str(cache))
         try:
-            self._recognizer = cv2.FaceRecognizerSF_create(str(path), "")
+            import torch
+            from facenet_pytorch import InceptionResnetV1
+        except ImportError as exc:
+            raise EmbeddingModelUnavailable("FaceNet dependencies are missing. Install backend/requirements.txt and run python backend/scripts/download_models.py") from exc
+        self._torch = torch
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        try:
+            self._model = InceptionResnetV1(pretrained="vggface2").eval().to(self.device)
         except Exception as exc:
-            raise EmbeddingModelUnavailable(f"Unable to load OpenCV SFace model: {exc}") from exc
-        self.model_name = "opencv-sface"
+            raise EmbeddingModelUnavailable(f"Unable to load pretrained FaceNet VGGFace2 weights: {exc}") from exc
+        self.model_name = "facenet-inceptionresnetv1-vggface2"
 
-    def embed(self, image: np.ndarray, bbox: tuple[int, int, int, int] | None = None, landmarks: np.ndarray | None = None) -> FaceEmbedding:
+    def embed(self, image: np.ndarray, bbox: tuple[int, int, int, int] | None = None, landmarks=None) -> FaceEmbedding:
+        del landmarks
         if bbox is None:
-            raise ValueError("SFace embedding requires a detected face bounding box")
-        x, y, w, h = bbox
-        if landmarks is None or len(landmarks) != 10:
-            landmarks = self._fallback_landmarks(x, y, w, h)
-        face_info = np.asarray([x, y, w, h, 1.0, *landmarks.tolist()], dtype=np.float32)
-        aligned = self._recognizer.alignCrop(image, face_info)
-        feature = self._recognizer.feature(aligned)
-        vector = normalize_embedding(feature)
-        return FaceEmbedding(vector, self.model_name, int(vector.shape[0]))
+            raise ValueError("FaceNet embedding requires a detected face bounding box")
+        face = self._preprocess(image, bbox)
+        tensor = self._torch.from_numpy(face).permute(2, 0, 1).unsqueeze(0).to(self.device)
+        with self._torch.no_grad():
+            vector = self._model(tensor).cpu().numpy()[0]
+        values = normalize_embedding(vector)
+        return FaceEmbedding(values, self.model_name, int(values.shape[0]))
 
     @staticmethod
-    def _fallback_landmarks(x: int, y: int, w: int, h: int) -> np.ndarray:
-        return np.asarray([x + .30*w, y + .38*h, x + .70*w, y + .38*h, x + .50*w, y + .55*h, x + .35*w, y + .76*h, x + .65*w, y + .76*h], dtype=np.float32)
+    def _preprocess(image: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray:
+        x, y, width, height = bbox
+        image_height, image_width = image.shape[:2]
+        padding = int(max(width, height) * 0.25)
+        left, top = max(0, x - padding), max(0, y - padding)
+        right, bottom = min(image_width, x + width + padding), min(image_height, y + height + padding)
+        crop = image[top:bottom, left:right]
+        if crop.size == 0 or min(crop.shape[:2]) < 12:
+            raise ValueError("Detected face is too small for FaceNet embedding")
+        rgb = cv2.cvtColor(cv2.resize(crop, (160, 160), interpolation=cv2.INTER_CUBIC), cv2.COLOR_BGR2RGB)
+        return (rgb.astype(np.float32) - 127.5) / 128.0
 
 
 def embed_detected(embedder, image: np.ndarray, face) -> FaceEmbedding:
-    """Call modern landmark-aware embedders while keeping test doubles compatible."""
+    """Use a detected YOLO face box with FaceNet; preserve simple test doubles."""
     try:
         return embedder.embed(image, face.bbox, face.landmarks)
     except TypeError:

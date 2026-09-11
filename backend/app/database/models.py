@@ -31,6 +31,7 @@ class FaceImage(Base):
     image_path: Mapped[str] = mapped_column(String(500))
     embedding_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     embedding: Mapped[bytes] = mapped_column(LargeBinary)
+    embedding_model: Mapped[str] = mapped_column(String(100), default="unknown")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
@@ -65,4 +66,3 @@ class AuditLog(Base):
     operation: Mapped[str] = mapped_column(String(50))
     description: Mapped[str] = mapped_column(Text)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-

@@ -9,12 +9,13 @@ from sqlalchemy import select
 from app.database.database import session_factory
 from app.database.models import FaceImage, Identity
 from app.models.detector import FaceDetector
-from app.models.embedder import SFaceEmbedder
+from app.models.embedder import FaceNetEmbedder
 from app.services.recognition_service import RecognitionService
 from app.services.vector_store import VectorStore
 
 
-EMBEDDING_DIMENSION = 128
+EMBEDDING_DIMENSION = 512
+EMBEDDING_MODEL = "facenet-inceptionresnetv1-vggface2"
 _lock = RLock()
 _detector = None
 _embedder = None
@@ -28,7 +29,7 @@ def get_runtime(session_factory_value):
     with _lock:
         if _detector is None:
             _detector = FaceDetector()
-            _embedder = SFaceEmbedder()
+            _embedder = FaceNetEmbedder()
             _vector_store = VectorStore(EMBEDDING_DIMENSION, Path("data/indexes/faces.npz"))
             active = session_factory_value()
             try:
@@ -40,13 +41,17 @@ def get_runtime(session_factory_value):
                 vectors = [
                     (image.id, np.frombuffer(image.embedding, dtype=np.float32))
                     for image, _ in rows
-                    if len(image.embedding) == EMBEDDING_DIMENSION * 4
+                    if len(image.embedding) == EMBEDDING_DIMENSION * 4 and image.embedding_model == EMBEDDING_MODEL
                 ]
                 _vector_store.rebuild(vectors)
                 _vector_store.save()
                 _recognizer = RecognitionService(
                     _vector_store,
-                    {image.id: identity_id for image, identity_id in rows if len(image.embedding) == EMBEDDING_DIMENSION * 4},
+                    {
+                        image.id: identity_id
+                        for image, identity_id in rows
+                        if len(image.embedding) == EMBEDDING_DIMENSION * 4 and image.embedding_model == EMBEDDING_MODEL
+                    },
                 )
             finally:
                 active.close()

@@ -163,7 +163,10 @@ async def enroll_image(
                 stored_path.unlink(missing_ok=True)
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
         image_record = IdentityRepository(session).add_face_image(
-            identity.id, str(stored_path), prepared.embedding.astype(np.float32).tobytes()
+            identity.id,
+            str(stored_path),
+            prepared.embedding.astype(np.float32).tobytes(),
+            prepared.model_name,
         )
         image_record.embedding_id = image_record.id
         session.commit()

@@ -32,12 +32,12 @@
 
 ## Project overview
 
-This system performs **face recognition, not face classification**. OpenCV Zoo's fixed YuNet detector finds faces and OpenCV SFace converts each aligned face into a numeric embedding. The application stores that embedding with identity information in SQLite and indexes it in FAISS for fast similarity search.
+This system performs **face recognition, not face classification**. A face-specific YOLOv8-Face detector finds face boxes and a fixed pretrained FaceNet model converts each prepared face into a numeric embedding. The application stores that embedding with identity information in SQLite and indexes it in FAISS for fast similarity search.
 
-Adding a new person creates one embedding and adds it to the database/vector index. Deleting a person deactivates database records and removes the matching vector entry. YuNet and SFace are never trained, fine-tuned, or restarted merely because identities change.
+Adding a new person creates one embedding and adds it to the database/vector index. Deleting a person deactivates database records and removes the matching vector entry. YOLOv8-Face and FaceNet are never trained, fine-tuned, or restarted merely because identities change.
 
 ```text
-Camera frame -> YuNet face detection -> SFace alignment -> SFace embedding
+Camera frame -> YOLO face detection -> crop/preprocessing -> FaceNet embedding
              -> FAISS similarity search -> Threshold decision -> KNOWN / UNKNOWN
 ```
 
@@ -66,7 +66,7 @@ This project uses embedding-based recognition instead. The pre-trained model is 
 
 | Component | Responsibility | Changes when a person is added/deleted? |
 | --- | --- | --- |
-| Pre-trained OpenCV SFace model | Face image -> normalized embedding | No |
+| Pre-trained FaceNet VGGFace2 model | Face image -> normalized embedding | No |
 | SQLite database | Identity metadata, image records, embedding relation | Yes |
 | FAISS vector index | Vector ID -> facial embedding | Yes |
 
@@ -127,13 +127,19 @@ Model retraining = never required for either operation
 | Layer | Technology |
 | --- | --- |
 | Backend API | Python 3.12, FastAPI, Uvicorn |
-| Face detection and embedding | OpenCV YuNet + OpenCV SFace |
-| Inference runtime | OpenCV DNN CPU |
+| Face detection and embedding | YOLOv8n-Face (WIDERFace) + FaceNet InceptionResnetV1 (VGGFace2) |
+| Inference runtime | OpenCV DNN CPU + PyTorch CPU/GPU |
 | Vector similarity search | FAISS CPU, normalized inner product / cosine similarity |
 | Relational data | SQLite, SQLAlchemy ORM |
 | Frontend | React, Vite |
 | Evaluation | NumPy, pandas, scikit-learn, matplotlib |
 | Tests | pytest, FastAPI TestClient |
+
+### Verified pretrained models
+
+- **Detection:** [`yolov8n-face-lindevs.onnx`](https://github.com/lindevs/yolov8-face), a YOLOv8n checkpoint trained specifically for face detection on WIDERFace. It outputs face bounding boxes; it is not a COCO `person` detector.
+- **Recognition:** [`InceptionResnetV1(pretrained="vggface2")`](https://github.com/timesler/facenet-pytorch) from `facenet-pytorch`, a fixed FaceNet-compatible model that returns normalized 512-dimensional embeddings.
+- `python backend/scripts/download_models.py` downloads the YOLO checkpoint with SHA-256 verification and explicitly loads the FaceNet VGGFace2 weights. No InsightFace-family package or model is used by this project.
 
 ## System architecture
 
@@ -150,9 +156,9 @@ flowchart TB
 
     subgraph Processing[Recognition pipeline]
         Capture[Camera capture worker]
-        Detect[OpenCV YuNet face detection]
-        Align[OpenCV SFace alignment]
-        Embed[Fixed OpenCV SFace embedding model]
+        Detect[YOLOv8n-Face detection]
+        Align[Face crop and FaceNet preprocessing]
+        Embed[Fixed FaceNet VGGFace2 model]
         Normalize[L2 normalize embedding]
         Search[FAISS inner product search]
         Decision{Similarity >= threshold?}
@@ -204,7 +210,7 @@ flowchart TD
     C --> D{Exactly one face?}
     D -->|No faces| E[Return: No face detected]
     D -->|More than one| F[Return: Multiple faces detected]
-    D -->|One face| G[Align and generate SFace embedding]
+    D -->|One face| G[Crop/preprocess and generate FaceNet embedding]
     G --> H[Normalize embedding]
     H --> I[Store identity, image record and embedding relation]
     I --> J[Add vector ID to FAISS]
@@ -237,7 +243,7 @@ flowchart TD
 sequenceDiagram
     participant User
     participant Service as FastAPI / service
-    participant Model as Fixed OpenCV SFace model
+    participant Model as Fixed FaceNet VGGFace2 model
     participant DB as SQLite
     participant Index as FAISS
 
@@ -284,7 +290,7 @@ assignment_image/
 │   ├── app/
 │   │   ├── api/                 # FastAPI routes
 │   │   ├── database/            # SQLAlchemy models and repositories
-        │   │   ├── models/              # YuNet detector and SFace embedder
+        │   │   ├── models/              # YOLO face detector and FaceNet embedder
 │   │   ├── services/            # Enrollment, recognition, camera, vector, evaluation services
 │   │   └── main.py              # Backend entry point
 │   ├── tests/                   # pytest unit/integration tests
@@ -318,11 +324,13 @@ python -m pip install --upgrade pip
 python -m pip install -r backend\requirements.txt
 ```
 
-Download the official OpenCV Zoo model files after installing Python dependencies:
+Download the verified YOLOv8n-Face and pretrained FaceNet VGGFace2 model files after installing Python dependencies:
 
 ```text
 python backend/scripts/download_models.py
 ```
+
+> **Model migration:** embeddings from an earlier model are intentionally excluded from FaceNet searches. Keep the old records for audit if required, but add a new reference photo for each active person after this model change so the system creates a FaceNet embedding.
 
 ### Frontend
 
@@ -340,7 +348,7 @@ Copy `.env.example` to `.env` and adjust as required:
 ```dotenv
 DATABASE_URL=sqlite:///./data/face_recognition.db
 DATA_DIR=./data
-MODEL_NAME=opencv-sface
+MODEL_NAME=facenet-inceptionresnetv1-vggface2
 RECOGNITION_THRESHOLD=0.60
 FRAME_SKIP=2
 MAX_UPLOAD_MB=10
@@ -591,8 +599,8 @@ GPU: <if used>
 RAM: <measured machine>
 
 Model
-Detector: OpenCV YuNet
-Embedding model: OpenCV SFace
+Detector: YOLOv8n-Face (WIDERFace checkpoint)
+Embedding model: FaceNet InceptionResnetV1 (VGGFace2)
 Resolution: <camera resolution>
 Registered identities: <count>
 
@@ -612,8 +620,8 @@ This table separates the full assignment specification from the code currently w
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| OpenCV YuNet + SFace models | Verified | YuNet and SFace weights load on CPU. |
-| Face detection / SFace embedding | Implemented | Fixed models; embeddings normalized. |
+| YOLOv8n-Face + FaceNet models | Verified | Face-specific YOLO checkpoint and FaceNet weights load without a model zoo. |
+| Face detection / FaceNet embedding | Implemented | Fixed models; embeddings normalized. |
 | SQLite schemas/repositories | Implemented | Identity, image, camera, event, audit schemas exist. |
 | FAISS vector store | Verified | FAISS active; persistence/rebuild tested. |
 | Similarity threshold / `UNKNOWN` | Implemented | Low score returns `UNKNOWN`. |
@@ -635,8 +643,8 @@ This table separates the full assignment specification from the code currently w
 
 | Problem | Likely cause | Resolution |
 | --- | --- | --- |
-| `YuNet/SFace model not found` | Model files have not been downloaded | Run `python backend/scripts/download_models.py`. |
-| Model fails to load | Interrupted download or incompatible OpenCV install | Re-run the model download and install `opencv-python==4.10.0.84`. |
+| `YOLO/FaceNet model not found` | Model files have not been downloaded | Run `python backend/scripts/download_models.py`. |
+| Model fails to load | Interrupted download or missing dependencies | Re-run the model download and install `backend/requirements.txt`. |
 | No face detected | Poor image/light or corrupt image | Upload a clear image containing one visible face. |
 | Multiple-face error | Reference image includes multiple people | Use an image containing only the enrolled person. |
 | Camera unavailable | Wrong USB index, busy device, bad RTSP/network | Verify camera details and test source independently. |

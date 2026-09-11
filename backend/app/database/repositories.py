@@ -61,8 +61,8 @@ class IdentityRepository:
         self.session.commit()
         return True
 
-    def add_face_image(self, identity_id: int, image_path: str, embedding: bytes) -> FaceImage:
-        image = FaceImage(identity_id=identity_id, image_path=image_path, embedding=embedding)
+    def add_face_image(self, identity_id: int, image_path: str, embedding: bytes, embedding_model: str = "unknown") -> FaceImage:
+        image = FaceImage(identity_id=identity_id, image_path=image_path, embedding=embedding, embedding_model=embedding_model)
         self.session.add(image)
         self.session.commit()
         self.session.refresh(image)

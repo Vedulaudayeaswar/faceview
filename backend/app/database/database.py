@@ -3,7 +3,7 @@
 from collections.abc import Generator
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 
@@ -17,6 +17,13 @@ def create_database(url: str = "sqlite:///./data/face_recognition.db"):
         database_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(url, connect_args={"check_same_thread": False} if url.startswith("sqlite") else {})
     Base.metadata.create_all(engine)
+    # Small backwards-compatible SQLite migration for databases created before
+    # embeddings carried their model identity.
+    if url.startswith("sqlite"):
+        columns = {column["name"] for column in inspect(engine).get_columns("face_images")}
+        if "embedding_model" not in columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE face_images ADD COLUMN embedding_model VARCHAR(100) DEFAULT 'unknown'"))
     return engine
 
 
@@ -30,4 +37,3 @@ def get_session(factory: sessionmaker[Session]) -> Generator[Session, None, None
         yield session
     finally:
         session.close()
-

@@ -1,4 +1,10 @@
-"""Temporary Phase 1 application entry point."""
+"""FastAPI application entry point."""
+
+import os
+
+# OpenCV/FAISS and CPU PyTorch can load different OpenMP runtimes on Windows.
+# This must be set before those libraries are imported by the API modules.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
