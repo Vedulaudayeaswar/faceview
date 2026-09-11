@@ -418,6 +418,37 @@ image52.jpg - Invalid image
 
 Deleting an image or identity must make its vector unavailable for future recognition. If a safe FAISS rebuild is used, it rebuilds only the vector index from active database embeddings. It does not train the face model.
 
+### Upload an enrollment image
+
+Start the backend, then run this from PowerShell. Replace the path with your own image:
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8000/api/enroll/image?identity_code=UDAY-001&name=Uday" `
+  -F "file=@C:\path\to\uday.jpg"
+```
+
+The image must contain exactly one detectable face. A successful enrollment stores the identity, image record, and embedding in SQLite, the reference image under `data/faces/`, and the searchable vector in `data/indexes/faces.npz`. Enrolling another person with a different identity code does not retrain the model.
+
+### Upload an image for recognition
+
+This recognizes the uploaded image against active embeddings already stored in the database:
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8000/api/recognize/image" `
+  -F "file=@C:\path\to\test-image.jpg"
+```
+
+The response contains face bounding boxes, similarity scores, accepted identity names, and `UNKNOWN` when a score is below the configured threshold.
+
+### Upload a video for recognition
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8000/api/recognize/video" `
+  -F "file=@C:\path\to\test-video.mp4"
+```
+
+The endpoint samples frames according to `frame_skip`, recognizes each detected face, returns known/unknown counts and per-face results, and records recognition events. It does **not** enroll people, store new face embeddings, or learn from the video. A face is recognized only when its embedding matches an active vector previously stored by enrollment.
+
 ## Recognition logic and UNKNOWN handling
 
 Embeddings are L2-normalized, so FAISS inner-product score approximates cosine similarity:
@@ -453,6 +484,9 @@ FastAPI publishes the live contract at `/docs`. Current routes:
 | `GET` | `/api/identities` | List active identities |
 | `POST` | `/api/identities` | Create identity metadata |
 | `DELETE` | `/api/identities/{id}` | Soft-delete one identity |
+| `POST` | `/api/enroll/image` | Validate one face image, store identity/image/embedding, and add vector |
+| `POST` | `/api/recognize/image` | Recognize faces in an uploaded image against stored vectors |
+| `POST` | `/api/recognize/video` | Recognize sampled video frames against stored vectors |
 | `GET` | `/api/cameras` | List cameras |
 | `POST` | `/api/cameras` | Create camera configuration |
 | `GET` | `/api/settings` | Read recognition settings |
@@ -588,8 +622,9 @@ This table separates the full assignment specification from the code currently w
 | Deletion/vector removal | Implemented | Soft-delete and vector removal tested. |
 | Evaluation helpers | Implemented | Requires real experimental samples. |
 | API metadata/cameras/settings | Implemented | Current routes listed above. |
-| Multipart photo enrollment API | Pending integration | Service exists, full upload route is not wired. |
-| Batch enrollment API | Pending integration | Validation exists, upload/persistence route remains. |
+| Multipart photo enrollment API | Implemented | `POST /api/enroll/image` stores image, embedding, identity, and vector. |
+| Image/video recognition upload API | Implemented | Image and video recognition use active stored vectors only. |
+| Batch enrollment API | Pending integration | Validation exists; multi-file persistence route remains. |
 | MJPEG/WebSocket browser stream | Pending integration | Capture/processing exist; stream route remains. |
 | Full React CRUD/live/evaluation views | Partial | Dashboard shell exists; functional views need API integration. |
 | Real camera/dataset benchmark | Not measured | No fabricated accuracy/FAR/FRR/FPS/latency values. |

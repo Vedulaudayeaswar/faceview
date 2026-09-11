@@ -19,3 +19,17 @@ def test_settings_api() -> None:
     response = client.put("/api/settings", json={"recognition_threshold": 0.72})
     assert response.status_code == 200
     assert response.json()["recognition_threshold"] == 0.72
+
+
+def test_upload_recognition_rejects_invalid_image_without_enrolling() -> None:
+    client = TestClient(app)
+    response = client.post("/api/recognize/image", files={"file": ("bad.jpg", b"not-an-image", "image/jpeg")})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid image file"
+
+
+def test_upload_routes_are_documented() -> None:
+    paths = app.openapi()["paths"]
+    assert "/api/enroll/image" in paths
+    assert "/api/recognize/image" in paths
+    assert "/api/recognize/video" in paths
