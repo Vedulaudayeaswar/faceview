@@ -7,6 +7,7 @@ The production implementation uses InsightFace's ArcFace embedding exposed by
 from dataclasses import dataclass
 
 import numpy as np
+import cv2
 
 
 class EmbeddingModelUnavailable(RuntimeError):
@@ -48,12 +49,33 @@ class ArcFaceEmbedder:
 
     def embed(self, image: np.ndarray, bbox: tuple[int, int, int, int] | None = None) -> FaceEmbedding:
         """Extract one normalized embedding, optionally selecting a known box."""
-        faces = self._app.get(image)
+        source = image
+        target_bbox = bbox
+        if bbox is not None:
+            # Video faces can be much smaller than enrollment faces. Crop with
+            # context and upscale before detection/alignment so ArcFace gets a
+            # useful face patch instead of a 20-30px face in a large frame.
+            x, y, w, h = bbox
+            height, width = image.shape[:2]
+            padding = int(max(w, h) * 0.35)
+            left = max(0, x - padding)
+            top = max(0, y - padding)
+            right = min(width, x + w + padding)
+            bottom = min(height, y + h + padding)
+            source = image[top:bottom, left:right]
+            if source.size == 0:
+                raise ValueError("Detected face crop is empty")
+            scale = max(1.0, 160.0 / max(1, min(source.shape[:2])))
+            if scale > 1.0:
+                source = cv2.resize(source, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            target_bbox = None
+
+        faces = self._app.get(source)
         if not faces:
             raise ValueError("No face detected")
         face = faces[0]
-        if bbox is not None:
-            x, y, w, h = bbox
+        if target_bbox is not None:
+            x, y, w, h = target_bbox
             target = np.array([x, y, x + w, y + h], dtype=np.float32)
             face = min(faces, key=lambda item: float(np.linalg.norm(np.asarray(item.bbox) - target)))
         raw = getattr(face, "embedding", None)
@@ -61,4 +83,3 @@ class ArcFaceEmbedder:
             raise RuntimeError("InsightFace did not return an embedding")
         vector = normalize_embedding(raw)
         return FaceEmbedding(vector, self.model_name, int(vector.shape[0]))
-
