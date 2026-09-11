@@ -1,31 +1,30 @@
-import React, { useState } from "react";
+import { useEffect, useState } from "react";
+import "./styles.css";
 
-const sections = ["Dashboard", "Live Recognition", "Add Person", "Batch Enrollment", "Manage Identities", "Cameras", "Recognition History", "Evaluation", "Settings"];
+const API = "http://127.0.0.1:8000";
 
 export default function App() {
-  const [active, setActive] = useState("Dashboard");
-  return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">FR</span><span>FaceWatch</span></div>
-        <p className="eyebrow">CONTROL CENTER</p>
-        <nav>{sections.map((section) => <button className={active === section ? "nav-item active" : "nav-item"} key={section} onClick={() => setActive(section)}>{section}</button>)}</nav>
-        <div className="privacy-note">Biometric data is sensitive. Delete reference data when it is no longer required.</div>
-      </aside>
-      <main className="content">
-        <header className="topbar"><div><p className="eyebrow">REAL-TIME OPERATIONS</p><h1>{active}</h1></div><span className="status"><i /> Backend ready</span></header>
-        {active === "Dashboard" ? <Dashboard /> : <section className="panel empty"><h2>{active}</h2><p>This module is connected to the backend API and will be populated as its phase is completed.</p></section>}
-      </main>
-    </div>
-  );
+  const [page, setPage] = useState("image");
+  const [identities, setIdentities] = useState([]);
+  const refresh = async () => { try { const r = await fetch(`${API}/api/identities`); if (r.ok) setIdentities(await r.json()); } catch {} };
+  useEffect(() => { refresh(); }, []);
+  const nav = [["image", "Recognize image"], ["video", "Recognize video"], ["enroll", "Enroll person"], ["people", "Manage identities"]];
+  return <div className="app-shell"><aside className="sidebar"><div className="brand"><span className="brand-mark">FV</span><span>FaceView</span></div><p className="eyebrow">FACE RECOGNITION</p><nav>{nav.map(([id, label]) => <button key={id} className={page === id ? "nav-item active" : "nav-item"} onClick={() => setPage(id)}>{label}</button>)}</nav><div className="privacy-note">Known faces are matched against enrolled embeddings. Unmatched faces are shown as UNKNOWN.</div></aside><main className="content"><header className="topbar"><div><p className="eyebrow">CONTROL CENTER</p><h1>{nav.find(([id]) => id === page)?.[1]}</h1></div><span className="status"><i /> API ready</span></header>{page === "image" && <RecognizeImage />}{page === "video" && <RecognizeVideo />}{page === "enroll" && <Enroll onDone={refresh} />}{page === "people" && <People identities={identities} refresh={refresh} />}</main></div>;
 }
 
-function Dashboard() {
-  const cards = [["0", "Registered identities", "Active records"], ["0", "Active cameras", "USB + RTSP"], ["0", "Recognition events", "Since startup"], ["—", "Current FPS", "Waiting for camera"]];
-  return <>
-    <section className="hero"><div><p className="eyebrow">SYSTEM OVERVIEW</p><h2>Recognition, without retraining.</h2><p>Add or remove identities through the database and vector index while the fixed ArcFace model stays unchanged.</p></div><div className="hero-orb">◉</div></section>
-    <section className="card-grid">{cards.map(([value, label, detail]) => <article className="stat-card" key={label}><span className="stat-value">{value}</span><strong>{label}</strong><small>{detail}</small></article>)}</section>
-    <section className="lower-grid"><article className="panel"><div className="panel-heading"><h3>Recent recognition events</h3><span className="muted">LIVE</span></div><div className="empty-table">No recognition events yet. Start a camera to begin.</div></article><article className="panel"><div className="panel-heading"><h3>System pipeline</h3></div><div className="pipeline"><span>Camera</span><b>→</b><span>Detection</span><b>→</b><span>Embedding</span><b>→</b><span>Search</span><b>→</b><span>Known / Unknown</span></div></article></section>
-  </>;
-}
+function RecognizeImage() { const [file, setFile] = useState(null); const [data, setData] = useState(null); const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const run = async () => { if (!file) return; setBusy(true); setError(""); setData(null); const form = new FormData(); form.append("file", file); try { const r = await fetch(`${API}/api/recognize/image`, { method: "POST", body: form }); const json = await r.json(); if (!r.ok) throw Error(json.detail || "Recognition failed"); setData(json); } catch (e) { setError(e.message); } finally { setBusy(false); } }; return <Page title="Image recognition" help="Upload a photo. Every detected face is boxed and classified against the database."><FileField accept="image/*" onChange={setFile} /><button className="primary" disabled={!file || busy} onClick={run}>{busy ? "Recognizing..." : "Recognize image"}</button>{error && <Message error>{error}</Message>}{data && <><ResultSummary data={data} /><ImageResult file={file} faces={data.faces || []} /></>}</Page>; }
 
+function RecognizeVideo() { const [file, setFile] = useState(null); const [data, setData] = useState(null); const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const run = async () => { if (!file) return; setBusy(true); setError(""); setData(null); const form = new FormData(); form.append("file", file); try { const r = await fetch(`${API}/api/recognize/video`, { method: "POST", body: form }); const json = await r.json(); if (!r.ok) throw Error(json.detail || "Video recognition failed"); setData(json); } catch (e) { setError(e.message); } finally { setBusy(false); } }; return <Page title="Video recognition" help="Upload a video. The processed video contains boxes and labels for known and unknown faces."><FileField accept="video/*" onChange={setFile} /><button className="primary" disabled={!file || busy} onClick={run}>{busy ? "Processing video..." : "Recognize video"}</button>{error && <Message error>{error}</Message>}{data && <><ResultSummary data={data} video /><video className="result-video" controls src={`${API}${data.annotated_video_url}`} /></>}</Page>; }
+
+function Enroll({ onDone }) { const [name, setName] = useState(""); const [code, setCode] = useState(""); const [file, setFile] = useState(null); const [message, setMessage] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const run = async () => { if (!name || !code || !file) return; setBusy(true); setMessage(""); setError(""); const form = new FormData(); form.append("file", file); try { const r = await fetch(`${API}/api/enroll/image?identity_code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}`, { method: "POST", body: form }); const json = await r.json(); if (!r.ok) throw Error(json.detail || "Enrollment failed"); setMessage(`Enrolled ${json.name} (${json.identity_code}) successfully.`); setName(""); setCode(""); setFile(null); onDone(); } catch (e) { setError(e.message); } finally { setBusy(false); } }; return <Page title="Enroll a person" help="Use a clear photo containing exactly one face. This creates an embedding; no model retraining is required."><Field label="Name" value={name} onChange={setName} placeholder="e.g. Sundar" /><Field label="Identity code" value={code} onChange={setCode} placeholder="e.g. sundar_001" /><FileField accept="image/*" onChange={setFile} /><button className="primary" disabled={!name || !code || !file || busy} onClick={run}>{busy ? "Enrolling..." : "Enroll face"}</button>{message && <Message>{message}</Message>}{error && <Message error>{error}</Message>}</Page>; }
+
+function People({ identities, refresh }) { const [error, setError] = useState(""); const remove = async (id, name) => { if (!confirm(`Delete ${name}?`)) return; const r = await fetch(`${API}/api/identities/${id}`, { method: "DELETE" }); if (!r.ok) { const j = await r.json(); setError(j.detail || "Delete failed"); } else refresh(); }; return <Page title="Manage identities" help="Delete an identity when it should no longer be recognized.">{error && <Message error>{error}</Message>}{identities.length ? <div className="identity-list">{identities.map(x => <div className="identity" key={x.id}><div><strong>{x.name}</strong><span>{x.identity_code}</span></div><button className="danger" onClick={() => remove(x.id, x.name)}>Delete</button></div>)}</div> : <Empty>No enrolled identities yet.</Empty>}</Page>; }
+
+function Page({ title, help, children }) { return <section className="panel page"><h2>{title}</h2><p className="help">{help}</p>{children}</section>; }
+function Field({ label, value, onChange, placeholder }) { return <label className="field"><span>{label}</span><input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} /></label>; }
+function FileField({ accept, onChange }) { return <label className="file-field"><span>Choose file</span><input type="file" accept={accept} onChange={e => onChange(e.target.files[0] || null)} /><small>JPG, PNG, MP4 or supported browser video</small></label>; }
+function Message({ children, error }) { return <div className={error ? "message error" : "message"}>{children}</div>; }
+function Empty({ children }) { return <div className="empty">{children}</div>; }
+function ResultSummary({ data, video }) { return <div className="summary"><b>{video ? `${data.frames_processed || 0} frames processed` : `${data.face_count || 0} face(s) detected`}</b><span className="known">Known: {video ? data.known_faces : (data.faces || []).filter(x => x.result === "KNOWN").length}</span><span className="unknown">Unknown: {video ? data.unknown_faces : (data.faces || []).filter(x => x.result !== "KNOWN").length}</span></div>; }
+function ImageResult({ file, faces }) { const [size, setSize] = useState({ width: 1, height: 1 }); return <div className="image-result"><img src={URL.createObjectURL(file)} onLoad={e => setSize({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })} /><Overlay faces={faces} size={size} /></div>; }
+function Overlay({ faces, size }) { return <div className="overlay">{faces.map((f, i) => { const [x, y, width, height] = f.bbox; return <div key={i} className={f.result === "KNOWN" ? "box known-box" : "box unknown-box"} style={{ left: `${x / size.width * 100}%`, top: `${y / size.height * 100}%`, width: `${width / size.width * 100}%`, height: `${height / size.height * 100}%` }}><span>{f.result === "KNOWN" ? `${f.name} | ID: ${f.identity_id}` : "UNKNOWN"}</span></div>; })}</div>; }

@@ -8,6 +8,7 @@ from uuid import uuid4
 import cv2
 import numpy as np
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
@@ -25,6 +26,7 @@ _sessions = session_factory(_engine)
 _settings = {"recognition_threshold": 0.60, "frame_skip": 2, "detection_confidence": 0.50}
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024
 _MAX_VIDEO_BYTES = 250 * 1024 * 1024
+_VIDEO_RESULTS_DIR = Path("data/video-results")
 
 
 class IdentityCreate(BaseModel):
@@ -94,10 +96,16 @@ def _identity_names() -> dict[int, str]:
         return {item.id: item.name for item in session.scalars(select(Identity).where(Identity.status == "ACTIVE"))}
 
 
-def _recognize_frame(frame: np.ndarray, threshold: float, camera_id: int | None = None) -> list[dict]:
+def _recognize_frame(
+    frame: np.ndarray,
+    threshold: float,
+    camera_id: int | None = None,
+    annotate: bool = False,
+) -> tuple[list[dict], np.ndarray | None]:
     detector, embedder, recognizer = get_runtime(_sessions)
     names = _identity_names()
     results = []
+    annotated = frame.copy() if annotate else None
     for face in detector.detect(frame):
         try:
             embedding = normalize_embedding(face.embedding) if face.embedding is not None else embedder.embed(frame, face.bbox).vector
@@ -112,9 +120,16 @@ def _recognize_frame(frame: np.ndarray, threshold: float, camera_id: int | None 
             "similarity": round(outcome.similarity, 6),
         }
         results.append(result)
+        if annotated is not None:
+            x, y, w, h = face.bbox
+            color = (70, 220, 120) if outcome.result == "KNOWN" else (70, 70, 240)
+            label = f"{result['name'] or 'UNKNOWN'} | ID: {result['identity_id'] or '-'} | {outcome.similarity:.1%}"
+            cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 2)
+            cv2.rectangle(annotated, (x, max(0, y - 28)), (min(frame.shape[1], x + 420), y), color, -1)
+            cv2.putText(annotated, label, (x + 5, max(19, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (15, 15, 15), 2)
         with _sessions() as session:
             EventService(session).record_recognition(camera_id, outcome.identity_id, outcome.similarity, outcome.result)
-    return results
+    return results, annotated
 
 
 @router.post("/enroll/image", status_code=201)
@@ -156,7 +171,7 @@ async def recognize_image(file: UploadFile = File(...), camera_id: int | None = 
     contents = await _read_upload(file, _MAX_IMAGE_BYTES)
     frame = _image_from_bytes(contents)
     threshold = float(_settings["recognition_threshold"])
-    faces = _recognize_frame(frame, threshold, camera_id)
+    faces, _ = _recognize_frame(frame, threshold, camera_id)
     return {"faces": faces, "face_count": len(faces), "threshold": threshold}
 
 
@@ -172,6 +187,17 @@ async def recognize_video(file: UploadFile = File(...), camera_id: int | None = 
         raise HTTPException(status_code=400, detail="Unable to open uploaded video")
     threshold = float(_settings["recognition_threshold"])
     frame_skip = int(_settings["frame_skip"])
+    _VIDEO_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    result_name = f"{uuid4().hex}.mp4"
+    result_path = _VIDEO_RESULTS_DIR / result_name
+    fps = capture.get(cv2.CAP_PROP_FPS) or 25.0
+    width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    writer = cv2.VideoWriter(str(result_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+    if not writer.isOpened():
+        capture.release()
+        temporary_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="Unable to create annotated result video")
     frame_number = 0
     processed_frames = 0
     results = []
@@ -181,12 +207,16 @@ async def recognize_video(file: UploadFile = File(...), camera_id: int | None = 
             if not ok:
                 break
             if frame_number % (frame_skip + 1) == 0:
-                faces = _recognize_frame(frame, threshold, camera_id)
+                faces, annotated = _recognize_frame(frame, threshold, camera_id, annotate=True)
                 results.extend(faces)
                 processed_frames += 1
+                writer.write(annotated if annotated is not None else frame)
+            else:
+                writer.write(frame)
             frame_number += 1
     finally:
         capture.release()
+        writer.release()
         temporary_path.unlink(missing_ok=True)
     return {
         "frames_read": frame_number,
@@ -195,9 +225,20 @@ async def recognize_video(file: UploadFile = File(...), camera_id: int | None = 
         "known_faces": sum(item["result"] == "KNOWN" for item in results),
         "unknown_faces": sum(item["result"] == "UNKNOWN" for item in results),
         "results": results,
+        "annotated_video_url": f"/api/results/video/{result_name}",
         "threshold": threshold,
         "frame_skip": frame_skip,
     }
+
+
+@router.get("/results/video/{filename}")
+def get_result_video(filename: str) -> FileResponse:
+    if Path(filename).name != filename or not filename.endswith(".mp4"):
+        raise HTTPException(status_code=404, detail="Video result not found")
+    path = _VIDEO_RESULTS_DIR / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Video result not found")
+    return FileResponse(path, media_type="video/mp4", filename="faceview-recognition.mp4")
 
 
 @router.get("/cameras")
