@@ -188,12 +188,14 @@ async def recognize_video(file: UploadFile = File(...), camera_id: int | None = 
     threshold = float(_settings["recognition_threshold"])
     frame_skip = int(_settings["frame_skip"])
     _VIDEO_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    result_name = f"{uuid4().hex}.mp4"
+    # VP8/WebM is broadly playable in browsers; mp4v often produces a blank
+    # HTML5 video even though the file was written successfully.
+    result_name = f"{uuid4().hex}.webm"
     result_path = _VIDEO_RESULTS_DIR / result_name
     fps = capture.get(cv2.CAP_PROP_FPS) or 25.0
     width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    writer = cv2.VideoWriter(str(result_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+    writer = cv2.VideoWriter(str(result_path), cv2.VideoWriter_fourcc(*"VP80"), fps, (width, height))
     if not writer.isOpened():
         capture.release()
         temporary_path.unlink(missing_ok=True)
@@ -233,12 +235,13 @@ async def recognize_video(file: UploadFile = File(...), camera_id: int | None = 
 
 @router.get("/results/video/{filename}")
 def get_result_video(filename: str) -> FileResponse:
-    if Path(filename).name != filename or not filename.endswith(".mp4"):
+    if Path(filename).name != filename or Path(filename).suffix.lower() not in {".mp4", ".webm"}:
         raise HTTPException(status_code=404, detail="Video result not found")
     path = _VIDEO_RESULTS_DIR / filename
     if not path.exists():
         raise HTTPException(status_code=404, detail="Video result not found")
-    return FileResponse(path, media_type="video/mp4", filename="faceview-recognition.mp4")
+    media_type = "video/webm" if path.suffix.lower() == ".webm" else "video/mp4"
+    return FileResponse(path, media_type=media_type, filename=f"faceview-recognition{path.suffix.lower()}")
 
 
 @router.get("/cameras")
