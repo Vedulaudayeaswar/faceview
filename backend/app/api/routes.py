@@ -150,11 +150,18 @@ async def enroll_image(
     stored_path = image_dir / f"{uuid4().hex}.jpg"
     stored_path.write_bytes(contents)
     with _sessions() as session:
-        try:
-            identity = IdentityRepository(session).create(identity_code, name, metadata or "{}")
-        except DuplicateIdentityError as exc:
-            stored_path.unlink(missing_ok=True)
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        repository = IdentityRepository(session)
+        existing = repository.get_by_code(identity_code)
+        if existing is not None and existing.status == "ACTIVE":
+            # Additional reference photos improve pose/lighting robustness.
+            # They share the identity and are independently searchable vectors.
+            identity = existing
+        else:
+            try:
+                identity = repository.create(identity_code, name, metadata or "{}")
+            except DuplicateIdentityError as exc:
+                stored_path.unlink(missing_ok=True)
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         image_record = IdentityRepository(session).add_face_image(
             identity.id, str(stored_path), prepared.embedding.astype(np.float32).tobytes()
         )

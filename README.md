@@ -80,12 +80,13 @@ Model retraining = never required for either operation
 
 ### Identity enrollment
 
-- Full name, unique identity code, optional metadata, and reference photo.
+- Full name, unique identity code, optional metadata, and one or more reference photos.
 - Exactly one detectable face is required.
 - Required validation responses:
   - `No face detected. Please upload another image.`
   - `Multiple faces detected. Please upload an image containing only one person.`
 - Decode image, detect face, generate/normalize embedding, store image/metadata, update FAISS, and log enrollment.
+- Additional photos uploaded with an existing active identity code are stored as additional reference embeddings, improving pose and lighting robustness without retraining.
 
 ### Batch enrollment
 

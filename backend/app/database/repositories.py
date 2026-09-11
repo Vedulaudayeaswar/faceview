@@ -44,6 +44,9 @@ class IdentityRepository:
     def list_active(self) -> list[Identity]:
         return list(self.session.scalars(select(Identity).where(Identity.status == "ACTIVE").order_by(Identity.id)))
 
+    def get_by_code(self, identity_code: str) -> Identity | None:
+        return self.session.scalar(select(Identity).where(Identity.identity_code == identity_code))
+
     def get(self, identity_id: int) -> Identity | None:
         return self.session.get(Identity, identity_id)
 
