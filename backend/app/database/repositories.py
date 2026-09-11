@@ -18,6 +18,19 @@ class IdentityRepository:
         self.session = session
 
     def create(self, identity_code: str, name: str, metadata_json: str | None = None) -> Identity:
+        existing = self.session.scalar(select(Identity).where(Identity.identity_code == identity_code))
+        if existing is not None:
+            if existing.status == "DELETED":
+                # Identity codes remain unique for audit/history, but a deleted
+                # identity may be enrolled again without manual DB editing.
+                existing.name = name
+                existing.metadata_json = metadata_json
+                existing.status = "ACTIVE"
+                existing.updated_at = datetime.now(timezone.utc)
+                self.session.commit()
+                self.session.refresh(existing)
+                return existing
+            raise DuplicateIdentityError(f"Identity code already exists: {identity_code}")
         identity = Identity(identity_code=identity_code, name=name, metadata_json=metadata_json)
         self.session.add(identity)
         try:
@@ -51,4 +64,3 @@ class IdentityRepository:
         self.session.commit()
         self.session.refresh(image)
         return image
-
