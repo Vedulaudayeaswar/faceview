@@ -16,6 +16,7 @@ from app.database.models import Camera, FaceImage, Identity, RecognitionEvent
 from app.database.repositories import DuplicateIdentityError, IdentityRepository
 from app.services.enrollment_service import EnrollmentError, EnrollmentService
 from app.services.event_service import EventService
+from app.models.embedder import normalize_embedding
 from app.services.runtime import add_vector, get_runtime, remove_vectors
 
 router = APIRouter(prefix="/api")
@@ -99,7 +100,7 @@ def _recognize_frame(frame: np.ndarray, threshold: float, camera_id: int | None 
     results = []
     for face in detector.detect(frame):
         try:
-            embedding = embedder.embed(frame, face.bbox).vector
+            embedding = normalize_embedding(face.embedding) if face.embedding is not None else embedder.embed(frame, face.bbox).vector
         except ValueError:
             continue
         outcome = recognizer.classify(embedding, threshold)

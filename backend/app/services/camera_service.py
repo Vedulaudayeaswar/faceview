@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import cv2
 import numpy as np
 
+from app.models.embedder import normalize_embedding
 from app.services.recognition_service import RecognitionService, RecognitionResult
 
 
@@ -68,8 +69,9 @@ class FrameRecognitionProcessor:
         results = []
         annotated = frame.copy()
         for face in faces:
+            embedding = normalize_embedding(face.embedding) if face.embedding is not None else self.embedder.embed(frame, face.bbox).vector
             outcome: RecognitionResult = self.recognizer.classify(
-                self.embedder.embed(frame, face.bbox).vector, self.threshold
+                embedding, self.threshold
             )
             label = f"{outcome.result} {outcome.similarity:.1%}"
             x, y, w, h = face.bbox

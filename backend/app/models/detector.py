@@ -20,6 +20,7 @@ class DetectedFace:
     bbox: tuple[int, int, int, int]
     confidence: float
     landmarks: Any | None = None
+    embedding: np.ndarray | None = None
 
 
 class FaceDetector:
@@ -58,10 +59,16 @@ class FaceDetector:
                 score = float(getattr(face, "det_score", 0.0))
                 if score >= self.confidence_threshold:
                     x1, y1, x2, y2 = [int(v) for v in face.bbox]
-                    result.append(DetectedFace((x1, y1, x2 - x1, y2 - y1), score, getattr(face, "kps", None)))
+                    result.append(
+                        DetectedFace(
+                            (x1, y1, x2 - x1, y2 - y1),
+                            score,
+                            getattr(face, "kps", None),
+                            getattr(face, "embedding", None),
+                        )
+                    )
             return sorted(result, key=lambda item: item.bbox[0])
 
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         boxes = self._cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
         return [DetectedFace(tuple(int(v) for v in box), 1.0) for box in sorted(boxes, key=lambda item: item[0])]
-
