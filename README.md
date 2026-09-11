@@ -377,6 +377,8 @@ cd frontend
 npm run dev
 ```
 
+Open `http://localhost:5173`, select **Live webcam**, and click **Start webcam**. Allow camera permission when the browser asks. The browser captures webcam frames locally and sends sampled JPEG frames to `POST /api/recognize/image`; the backend returns FaceNet/FAISS matches and the page draws green known or red `UNKNOWN` boxes. Click **Stop webcam** to release the camera.
+
 Create a production build with:
 
 ```powershell
