@@ -6,6 +6,8 @@ from typing import Protocol
 import cv2
 import numpy as np
 
+from app.models.embedder import embed_detected
+
 
 class EnrollmentError(ValueError):
     """A user-correctable enrollment validation error."""
@@ -58,7 +60,7 @@ class EnrollmentService:
         if len(faces) > 1:
             raise EnrollmentError("Multiple faces detected. Please upload an image containing only one person.")
         face = faces[0]
-        result = self.embedder.embed(image, face.bbox)
+        result = embed_detected(self.embedder, image, face)
         return PreparedEnrollment(image=image, embedding=result.vector, model_name=result.model_name)
 
     def validate_batch(self, files: list[tuple[str, bytes]]) -> BatchEnrollmentReport:

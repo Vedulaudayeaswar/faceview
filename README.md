@@ -32,12 +32,12 @@
 
 ## Project overview
 
-This system performs **face recognition, not face classification**. A fixed, pre-trained InsightFace ArcFace model converts every detected face into a numeric embedding. The application stores that embedding with identity information in SQLite and indexes it in FAISS for fast similarity search.
+This system performs **face recognition, not face classification**. OpenCV Zoo's fixed YuNet detector finds faces and OpenCV SFace converts each aligned face into a numeric embedding. The application stores that embedding with identity information in SQLite and indexes it in FAISS for fast similarity search.
 
-Adding a new person creates one embedding and adds it to the database/vector index. Deleting a person deactivates database records and removes the matching vector entry. The ArcFace model is never trained, fine-tuned, or restarted merely because identities change.
+Adding a new person creates one embedding and adds it to the database/vector index. Deleting a person deactivates database records and removes the matching vector entry. YuNet and SFace are never trained, fine-tuned, or restarted merely because identities change.
 
 ```text
-Camera frame -> Face detection -> Face alignment -> ArcFace embedding
+Camera frame -> YuNet face detection -> SFace alignment -> SFace embedding
              -> FAISS similarity search -> Threshold decision -> KNOWN / UNKNOWN
 ```
 
@@ -66,7 +66,7 @@ This project uses embedding-based recognition instead. The pre-trained model is 
 
 | Component | Responsibility | Changes when a person is added/deleted? |
 | --- | --- | --- |
-| Pre-trained InsightFace ArcFace model | Face image -> normalized embedding | No |
+| Pre-trained OpenCV SFace model | Face image -> normalized embedding | No |
 | SQLite database | Identity metadata, image records, embedding relation | Yes |
 | FAISS vector index | Vector ID -> facial embedding | Yes |
 
@@ -126,8 +126,8 @@ Model retraining = never required for either operation
 | Layer | Technology |
 | --- | --- |
 | Backend API | Python 3.12, FastAPI, Uvicorn |
-| Face detection and embedding | OpenCV, InsightFace `buffalo_l`, SCRFD, ArcFace |
-| Inference runtime | ONNX Runtime CPU |
+| Face detection and embedding | OpenCV YuNet + OpenCV SFace |
+| Inference runtime | OpenCV DNN CPU |
 | Vector similarity search | FAISS CPU, normalized inner product / cosine similarity |
 | Relational data | SQLite, SQLAlchemy ORM |
 | Frontend | React, Vite |
@@ -149,9 +149,9 @@ flowchart TB
 
     subgraph Processing[Recognition pipeline]
         Capture[Camera capture worker]
-        Detect[SCRFD face detection]
-        Align[Face alignment / preprocessing]
-        Embed[Fixed ArcFace embedding model]
+        Detect[OpenCV YuNet face detection]
+        Align[OpenCV SFace alignment]
+        Embed[Fixed OpenCV SFace embedding model]
         Normalize[L2 normalize embedding]
         Search[FAISS inner product search]
         Decision{Similarity >= threshold?}
@@ -203,7 +203,7 @@ flowchart TD
     C --> D{Exactly one face?}
     D -->|No faces| E[Return: No face detected]
     D -->|More than one| F[Return: Multiple faces detected]
-    D -->|One face| G[Align and generate ArcFace embedding]
+    D -->|One face| G[Align and generate SFace embedding]
     G --> H[Normalize embedding]
     H --> I[Store identity, image record and embedding relation]
     I --> J[Add vector ID to FAISS]
@@ -236,7 +236,7 @@ flowchart TD
 sequenceDiagram
     participant User
     participant Service as FastAPI / service
-    participant Model as Fixed ArcFace model
+    participant Model as Fixed OpenCV SFace model
     participant DB as SQLite
     participant Index as FAISS
 
@@ -283,7 +283,7 @@ assignment_image/
 │   ├── app/
 │   │   ├── api/                 # FastAPI routes
 │   │   ├── database/            # SQLAlchemy models and repositories
-│   │   ├── models/              # Detector and ArcFace embedder
+        │   │   ├── models/              # YuNet detector and SFace embedder
 │   │   ├── services/            # Enrollment, recognition, camera, vector, evaluation services
 │   │   └── main.py              # Backend entry point
 │   ├── tests/                   # pytest unit/integration tests
@@ -317,10 +317,10 @@ python -m pip install --upgrade pip
 python -m pip install -r backend\requirements.txt
 ```
 
-InsightFace downloads `buffalo_l` on its first model initialization. This workspace has verified weights at:
+Download the official OpenCV Zoo model files after installing Python dependencies:
 
 ```text
-C:\Users\padma\.insightface\models\buffalo_l
+python backend/scripts/download_models.py
 ```
 
 ### Frontend
@@ -339,7 +339,7 @@ Copy `.env.example` to `.env` and adjust as required:
 ```dotenv
 DATABASE_URL=sqlite:///./data/face_recognition.db
 DATA_DIR=./data
-MODEL_NAME=buffalo_l
+MODEL_NAME=opencv-sface
 RECOGNITION_THRESHOLD=0.60
 FRAME_SKIP=2
 MAX_UPLOAD_MB=10
@@ -590,8 +590,8 @@ GPU: <if used>
 RAM: <measured machine>
 
 Model
-Detector: SCRFD
-Embedding model: ArcFace / buffalo_l
+Detector: OpenCV YuNet
+Embedding model: OpenCV SFace
 Resolution: <camera resolution>
 Registered identities: <count>
 
@@ -611,8 +611,8 @@ This table separates the full assignment specification from the code currently w
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| InsightFace `buffalo_l` model | Verified | SCRFD and ArcFace weights load on CPU. |
-| Face detection / ArcFace embedding | Implemented | Fixed model; embeddings normalized. |
+| OpenCV YuNet + SFace models | Verified | YuNet and SFace weights load on CPU. |
+| Face detection / SFace embedding | Implemented | Fixed models; embeddings normalized. |
 | SQLite schemas/repositories | Implemented | Identity, image, camera, event, audit schemas exist. |
 | FAISS vector store | Verified | FAISS active; persistence/rebuild tested. |
 | Similarity threshold / `UNKNOWN` | Implemented | Low score returns `UNKNOWN`. |
@@ -634,8 +634,8 @@ This table separates the full assignment specification from the code currently w
 
 | Problem | Likely cause | Resolution |
 | --- | --- | --- |
-| `InsightFace is not installed` | Missing dependencies | Activate `.venv` and install `backend/requirements.txt`. |
-| Model fails to load | Interrupted download/missing model files | Re-run model initialization and verify the `buffalo_l` ONNX files. |
+| `YuNet/SFace model not found` | Model files have not been downloaded | Run `python backend/scripts/download_models.py`. |
+| Model fails to load | Interrupted download or incompatible OpenCV install | Re-run the model download and install `opencv-python==4.10.0.84`. |
 | No face detected | Poor image/light or corrupt image | Upload a clear image containing one visible face. |
 | Multiple-face error | Reference image includes multiple people | Use an image containing only the enrolled person. |
 | Camera unavailable | Wrong USB index, busy device, bad RTSP/network | Verify camera details and test source independently. |

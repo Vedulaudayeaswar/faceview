@@ -22,7 +22,7 @@ class FakeDetector:
 
 class FakeEmbedding:
     vector = np.array([1.0, 0.0], dtype=np.float32)
-    model_name = "test-arcface"
+    model_name = "test-sface"
 
 
 class FakeEmbedder:
@@ -32,7 +32,7 @@ class FakeEmbedder:
 
 def test_valid_single_image_is_prepared() -> None:
     result = EnrollmentService(FakeDetector(1), FakeEmbedder()).prepare_single(encoded_image())
-    assert result.model_name == "test-arcface"
+    assert result.model_name == "test-sface"
     assert result.embedding.tolist() == [1.0, 0.0]
 
 
@@ -46,4 +46,3 @@ def test_valid_single_image_is_prepared() -> None:
 def test_enrollment_requires_exactly_one_face(count: int, message: str) -> None:
     with pytest.raises(EnrollmentError, match=message):
         EnrollmentService(FakeDetector(count), FakeEmbedder()).prepare_single(encoded_image())
-

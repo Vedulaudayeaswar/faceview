@@ -21,7 +21,7 @@ class FakeDetector:
 
 class FakeEmbedding:
     vector = np.array([1.0, 0.0], dtype=np.float32)
-    model_name = "test-arcface"
+    model_name = "test-sface"
 
 
 class FakeEmbedder:
