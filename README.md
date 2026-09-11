@@ -262,55 +262,17 @@ sequenceDiagram
 ## Database design
 
 ```mermaid
-erDiagram
-    IDENTITIES ||--o{ FACE_IMAGES : owns
-    IDENTITIES ||--o{ RECOGNITION_EVENTS : may_match
-    IDENTITIES ||--o{ AUDIT_LOGS : affects
-    CAMERAS ||--o{ RECOGNITION_EVENTS : produces
+flowchart LR
+    I[(identities<br/>id, identity_code, name<br/>metadata, status, timestamps)]
+    F[(face_images<br/>id, identity_id, image_path<br/>embedding_id, embedding, status)]
+    C[(cameras<br/>id, camera_name, camera_type<br/>device_index, rtsp_url, status)]
+    R[(recognition_events<br/>id, identity_id, camera_id<br/>similarity_score, result, timestamp)]
+    A[(audit_logs<br/>id, identity_id, operation<br/>description, timestamp)]
 
-    IDENTITIES {
-        int id PK
-        string identity_code UK
-        string name
-        text metadata_json
-        string status
-        datetime created_at
-        datetime updated_at
-    }
-    FACE_IMAGES {
-        int id PK
-        int identity_id FK
-        string image_path
-        int embedding_id
-        binary embedding
-        string status
-        datetime created_at
-        datetime deleted_at
-    }
-    CAMERAS {
-        int id PK
-        string camera_name
-        string camera_type
-        int device_index
-        string rtsp_url
-        string status
-        datetime created_at
-    }
-    RECOGNITION_EVENTS {
-        int id PK
-        int identity_id FK
-        int camera_id FK
-        float similarity_score
-        string result
-        datetime timestamp
-    }
-    AUDIT_LOGS {
-        int id PK
-        int identity_id FK
-        string operation
-        text description
-        datetime timestamp
-    }
+    I -->|one identity owns many images| F
+    I -->|identity may be recognized| R
+    C -->|camera produces events| R
+    I -->|operations may affect identity| A
 ```
 
 ## Project structure
