@@ -33,3 +33,4 @@ def test_upload_routes_are_documented() -> None:
     assert "/api/enroll/image" in paths
     assert "/api/recognize/image" in paths
     assert "/api/recognize/video" in paths
+    assert "/api/webcam/stream" in paths

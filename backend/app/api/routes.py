@@ -2,13 +2,14 @@
 
 import json
 import tempfile
+from threading import Lock
 from pathlib import Path
 from uuid import uuid4
 
 import cv2
 import numpy as np
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
@@ -27,6 +28,7 @@ _settings = {"recognition_threshold": 0.60, "frame_skip": 2, "detection_confiden
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024
 _MAX_VIDEO_BYTES = 250 * 1024 * 1024
 _VIDEO_RESULTS_DIR = Path("data/video-results")
+_webcam_lock = Lock()
 
 
 class IdentityCreate(BaseModel):
@@ -130,6 +132,34 @@ def _recognize_frame(
         with _sessions() as session:
             EventService(session).record_recognition(camera_id, outcome.identity_id, outcome.similarity, outcome.result)
     return results, annotated
+
+
+@router.get("/webcam/stream")
+def webcam_stream(device_index: int = Query(default=0, ge=0, le=10)) -> StreamingResponse:
+    """Return an annotated MJPEG stream from a locally attached USB/web camera."""
+    if not _webcam_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Webcam is already in use by another FaceView stream")
+    capture = cv2.VideoCapture(device_index, cv2.CAP_DSHOW)
+    if not capture.isOpened():
+        _webcam_lock.release()
+        raise HTTPException(status_code=503, detail=f"Unable to open webcam device {device_index}")
+
+    def frames():
+        try:
+            while True:
+                ok, frame = capture.read()
+                if not ok or frame is None:
+                    break
+                _, annotated = _recognize_frame(frame, float(_settings["recognition_threshold"]), annotate=True)
+                output = annotated if annotated is not None else frame
+                encoded, jpeg = cv2.imencode(".jpg", output, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                if encoded:
+                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
+        finally:
+            capture.release()
+            _webcam_lock.release()
+
+    return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 
 @router.post("/enroll/image", status_code=201)
